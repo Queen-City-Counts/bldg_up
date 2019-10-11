@@ -11,10 +11,22 @@ for tr in soup.find_all("tr"):
 data=list()
 for r in range(3,int(len(raw)-1)):
     address = str(raw[r][1].find('span').getText())
-    sbl = str(raw[r][1])[96:108]
-    tmp = [address,sbl]
+    sbl_long = str(raw[r][1])[96:108]
+    sbl_short = str(raw[r][2].getText())
+    sale_price = str(raw[r][3].getText().split(" - ")[0])
+    sale_date = str(raw[r][3].getText().split(" - ")[1])
+    assessment = str(raw[r][4].getText())
+    prop_type = str(raw[r][5].getText())
+    lot_size = str(raw[r][6].getText())
+    yr_blt = str(raw[r][7].getText())
+    sqft = str(raw[r][8].getText())
+    try:
+        bedrooms = str(raw[r][9].getText().split(" / ")[0])
+        baths = str(raw[r][9].getText().split(" / ")[1])
+        fireplaces = str(raw[r][9].getText().split(" / ")[2])
+    except:
+        bedrooms = ""
+        baths = ""
+        fireplaces = ""
+    tmp = [address, sbl_long, sbl_short, sale_price, sale_date, assessment, prop_type, lot_size, yr_blt, sqft, bedrooms, baths, fireplaces]
     data.append(tmp)
-
-
-
-
