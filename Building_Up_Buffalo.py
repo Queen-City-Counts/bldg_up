@@ -1,16 +1,27 @@
 import pandas as pd
+import numpy as np
 
+start_yr = 2008
+end_yr = 2018
+
+## create year df
+year = list()
+for y in range(0,(end_yr - start_yr+1)):
+    year.append(str(start_yr+y))
+    
+year = pd.DataFrame(year)
+year.columns = ['YEAR']
 
 ## ASSESSMENT DATA
-
 ## city has been using same assessment roll throughout period
 ## https://www.wkbw.com/news/local-news/sticker-shock-with-new-buffalo-property-assessments
 asmt = pd.read_csv('/home/dan/Python/QueenCityCounts/bldg_up/data/2017-2018_Assessment_Roll.csv', dtype=object)
-asmt = asmt[['PRINT KEY','PROPERTY CLASS','ADDRESS','TOTAL VALUE','NEIGHBORHOOD','ZIP CODE (5-DIGIT)']]
+asmt = asmt[['PRINT KEY','PROPERTY CLASS','TOTAL VALUE','NEIGHBORHOOD']]
 
-## only want the 200s, 400s, and 500s
+## only want the 200s (residentials) and 400s (commercials)
 ## https://www.tax.ny.gov/research/property/assess/manuals/prclas.htm
-asmt = asmt.loc[asmt['PROPERTY CLASS'].astype(str).str[0].isin(['2','4','5'])]
+asmt = asmt.loc[asmt['PROPERTY CLASS'].astype(str).str[0].isin(['2','4'])]
+asmt.rename(columns={'PRINT KEY':'SBL','PROPERTY CLASS':'PROP_TYPE','TOTAL VALUE':'ASMT','NEIGHBORHOOD':'NBHD'},inplace=True)
 
 
 
@@ -18,17 +29,22 @@ asmt = asmt.loc[asmt['PROPERTY CLASS'].astype(str).str[0].isin(['2','4','5'])]
 ## read in and clean
 sales = pd.read_csv('/home/dan/Python/QueenCityCounts/bldg_up/data/property_sales_(2000-01-01--2019-10-15).csv', dtype=object)
 
-sales["prop_type"] = sales["prop_type"].str.split(" -", expand = True)
-sales = sales.loc[sales['prop_type'].astype(str).isin(['Residential','Commercial','Recreation and Entertainment'])]
-
 sales['assessment'] = sales.assessment.apply(lambda x: x.strip('$').replace(',',''))
 sales['sale_price'] = sales.sale_price.apply(lambda x: x.strip('$').replace(',',''))
 
-sales['yr_sold'] = sales.sale_date.apply(lambda x: x.split('/')[-1])
+sales['sale_yr'] = sales.sale_date.apply(lambda x: x.split('/')[-1])
 
-## pull in neighborhood from asmt, on sbl
-sales = pd.merge(sales, asmt[['PRINT KEY','NEIGHBORHOOD']], how='left', left_on='sbl_short', right_on = 'PRINT KEY')
-sales = sales.drop(columns='PRINT KEY')
 
-## find assessment vs sale_price differential
-sales['price_diff'] = sales['sale_price'].astype(float) - sales['assessment'].astype(float)
+
+
+## CONSTRUCT MAIN DF
+## repeat entire asmt df, for each year in the time range
+year = year.assign(key=1)
+asmt = asmt.assign(key=1)
+df = asmt.merge(year, on='key',how='inner').drop('key',axis=1)
+df = df.sort_values('YEAR', ascending=True).reset_index(drop=True)
+
+## if property has a sale recorded in sales df, bring that in
+df = pd.merge(df, sales[['sale_price','sale_yr','sbl_short']], how = 'left', left_on = ['YEAR','SBL'], right_on = ['sale_yr','sbl_short'])
+df = df.astype({'ASMT': float, 'sale_price': float})
+
