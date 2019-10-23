@@ -16,14 +16,12 @@ year.columns = ['YEAR']
 ## city has been using same assessment roll throughout period
 ## https://www.wkbw.com/news/local-news/sticker-shock-with-new-buffalo-property-assessments
 asmt = pd.read_csv('/home/dan/Python/QueenCityCounts/bldg_up/data/2017-2018_Assessment_Roll.csv', dtype=object)
-asmt = asmt[['PRINT KEY','PROPERTY CLASS','TOTAL VALUE','NEIGHBORHOOD']]
+asmt = asmt[['PRINT KEY','PROPERTY CLASS','TOTAL VALUE','NEIGHBORHOOD']].drop_duplicates()
 
 ## only want the 200s (residentials) and 400s (commercials)
 ## https://www.tax.ny.gov/research/property/assess/manuals/prclas.htm
 asmt = asmt.loc[asmt['PROPERTY CLASS'].astype(str).str[0].isin(['2','4'])]
 asmt.rename(columns={'PRINT KEY':'SBL','PROPERTY CLASS':'PROP_TYPE','TOTAL VALUE':'ASMT','NEIGHBORHOOD':'NBHD'},inplace=True)
-
-
 
 ## SALES DATA
 ## read in and clean
@@ -34,8 +32,14 @@ sales['sale_price'] = sales.sale_price.apply(lambda x: x.strip('$').replace(',',
 
 sales['sale_yr'] = sales.sale_date.apply(lambda x: x.split('/')[-1])
 
+## PERMITS DATA
+pmts = pd.read_csv('/home/dan/Python/QueenCityCounts/bldg_up/data/Permits 2019-2007.csv',  dtype=object)
+pmts = pmts[['PERMIT NUMBER','ISSUED','SBL']].drop_duplicates()
+pmts['YEAR'] = pmts.ISSUED.apply(lambda x: x.split('/')[-1])
 
-
+## create short sbl
+## https://www.preservationready.org/Main/SBLNumber
+pmts['SBL_SHORT'] = pmts.SBL.apply(lambda x: str(x)[0:3].strip('0') + '.' + str(x)[3:5].strip('0') + '-' + str(x)[5:10].strip('0') + '-' + str(x)[10:13].strip('0')  + '.' + str(x)[13:16].strip('0') + '-' + str(x)[16:].strip('0'))
 
 ## CONSTRUCT MAIN DF
 ## repeat entire asmt df, for each year in the time range
