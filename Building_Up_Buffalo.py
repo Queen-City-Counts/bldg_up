@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 
+pd.set_option('display.max_columns', None)
+
 start_yr = 2008
 end_yr = 2018
 
@@ -27,19 +29,31 @@ asmt.rename(columns={'PRINT KEY':'SBL','PROPERTY CLASS':'PROP_TYPE','TOTAL VALUE
 ## read in and clean
 sales = pd.read_csv('/home/dan/Python/QueenCityCounts/bldg_up/data/property_sales_(2000-01-01--2019-10-15).csv', dtype=object)
 
-sales['assessment'] = sales.assessment.apply(lambda x: x.strip('$').replace(',',''))
-sales['sale_price'] = sales.sale_price.apply(lambda x: x.strip('$').replace(',',''))
+sales['assessment'] = sales['assessment'].apply(lambda x: x.strip('$').replace(',',''))
+sales['SALE_PRICE'] = sales['sale_price'].apply(lambda x: x.strip('$').replace(',',''))
 
-sales['sale_yr'] = sales.sale_date.apply(lambda x: x.split('/')[-1])
+sales['sale_yr'] = sales['sale_date'].apply(lambda x: x.split('/')[-1])
 
 ## PERMITS DATA
 pmts = pd.read_csv('/home/dan/Python/QueenCityCounts/bldg_up/data/Permits 2019-2007.csv',  dtype=object)
 pmts = pmts[['PERMIT NUMBER','ISSUED','SBL']].drop_duplicates()
-pmts['YEAR'] = pmts.ISSUED.apply(lambda x: x.split('/')[-1])
+pmts['YEAR'] = pmts['ISSUED'].apply(lambda x: x.split('/')[-1])
 
-## create short sbl
-## https://www.preservationready.org/Main/SBLNumber
-pmts['SBL_SHORT'] = pmts.SBL.apply(lambda x: str(x)[0:3].strip('0') + '.' + str(x)[3:5].strip('0') + '-' + str(x)[5:10].strip('0') + '-' + str(x)[10:13].strip('0')  + '.' + str(x)[13:16].strip('0') + '-' + str(x)[16:].strip('0'))
+def format_sbl(sbl_long):
+    sbl = str(sbl_long)[0:3].strip('0') + '.' + str(sbl_long)[3:5].strip('0') + '-' + str(sbl_long)[5:10].strip('0') + '-' + str(sbl_long)[10:13].strip('0')  + '.' + str(sbl_long)[13:16].strip('0') + '/' + str(sbl_long)[16:].strip('0')
+    if sbl[-1] == '/' and sbl[-2] != '.':
+        sbl = sbl[:-1]
+    elif sbl[-2:] == './':
+        sbl = sbl[:-2]
+    if sbl == 'nan.--' or sbl == '.--':
+        sbl = 'missing'
+    return sbl
+
+pmts['SBL'] = pmts['SBL'].apply(format_sbl)
+
+pmts = pd.pivot_table(pmts, index=['YEAR','SBL'],values=['PERMIT NUMBER'],aggfunc='count')
+pmts.reset_index(inplace=True)
+pmts.rename(columns={'PERMIT NUMBER':'BLDG_PERMITS'},inplace=True)
 
 ## CONSTRUCT MAIN DF
 ## repeat entire asmt df, for each year in the time range
@@ -48,7 +62,12 @@ asmt = asmt.assign(key=1)
 df = asmt.merge(year, on='key',how='inner').drop('key',axis=1)
 df = df.sort_values('YEAR', ascending=True).reset_index(drop=True)
 
-## if property has a sale recorded in sales df, bring that in
-df = pd.merge(df, sales[['sale_price','sale_yr','sbl_short']], how = 'left', left_on = ['YEAR','SBL'], right_on = ['sale_yr','sbl_short'])
-df = df.astype({'ASMT': float, 'sale_price': float})
+## if property has a sale recorded in sales df, bring that into main df
+df = pd.merge(df, sales[['SALE_PRICE','sale_yr','sbl_short']], how = 'left', left_on = ['YEAR','SBL'], right_on = ['sale_yr','sbl_short'])
 
+## if property has any permits recorded in pmts df, bring that in to main df
+df = pd.merge(df, pmts[['BLDG_PERMITS', 'YEAR','SBL']], how = 'left', left_on = ['YEAR','SBL'], right_on = ['YEAR','SBL'])
+
+## polish up the df
+df = df[['SBL','YEAR','PROP_TYPE','ASMT','SALE_PRICE','NBHD','BLDG_PERMITS']]
+df = df.astype({'ASMT': float, 'SALE_PRICE': float, 'BLDG_PERMITS': float})
