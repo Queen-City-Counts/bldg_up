@@ -5,6 +5,7 @@ pd.set_option('display.max_columns', None)
 
 start_yr = 2008
 end_yr = 2018
+trim = .025
 
 ## create year df
 year = list()
@@ -53,7 +54,7 @@ pmts['SBL'] = pmts['SBL'].apply(format_sbl)
 
 pmts = pd.pivot_table(pmts, index=['YEAR','SBL'],values=['PERMIT NUMBER'],aggfunc='count')
 pmts.reset_index(inplace=True)
-pmts.rename(columns={'PERMIT NUMBER':'BLDG_PERMITS'},inplace=True)
+pmts.rename(columns={'PERMIT NUMBER':'PERMITS'},inplace=True)
 
 ## CONSTRUCT MAIN DF
 ## repeat entire asmt df, for each year in the time range
@@ -66,8 +67,33 @@ df = df.sort_values('YEAR', ascending=True).reset_index(drop=True)
 df = pd.merge(df, sales[['SALE_PRICE','sale_yr','sbl_short']], how = 'left', left_on = ['YEAR','SBL'], right_on = ['sale_yr','sbl_short'])
 
 ## if property has any permits recorded in pmts df, bring that in to main df
-df = pd.merge(df, pmts[['BLDG_PERMITS', 'YEAR','SBL']], how = 'left', left_on = ['YEAR','SBL'], right_on = ['YEAR','SBL'])
+df = pd.merge(df, pmts[['PERMITS', 'YEAR','SBL']], how = 'left', left_on = ['YEAR','SBL'], right_on = ['YEAR','SBL'])
 
 ## polish up the df
-df = df[['SBL','YEAR','PROP_TYPE','ASMT','SALE_PRICE','NBHD','BLDG_PERMITS']]
-df = df.astype({'ASMT': float, 'SALE_PRICE': float, 'BLDG_PERMITS': float})
+df = df[['SBL','YEAR','PROP_TYPE','ASMT','SALE_PRICE','NBHD','PERMITS']]
+df = df.astype({'ASMT': float, 'SALE_PRICE': float, 'PERMITS': float})
+df['PRICE_DIFF'] = (df['SALE_PRICE'] - df['ASMT'])/df['ASMT']
+
+## outliers per year (by hard threshold)
+olrs = pd.pivot_table(df, index=['YEAR'],values=['SALE_PRICE'],aggfunc='count')
+olrs.reset_index(inplace=True)
+olrs.rename(columns={'SALE_PRICE':'SALES'},inplace=True)
+olrs['CUTOFF'] = olrs['SALES'].apply(lambda x: int(x*trim))
+
+min_max = []
+for row in range(0, len(olrs)):
+    year = olrs.loc[row,'YEAR']
+    trim = olrs.loc[row,'CUTOFF']
+    mx = df[df['YEAR'] == year]['PRICE_DIFF'].nlargest(trim).iloc[-1]
+    mn = df[df['YEAR'] == year]['PRICE_DIFF'].nsmallest(trim).iloc[0]
+    min_max.append([year,mn,mx])
+
+min_max  = pd.DataFrame(min_max)
+min_max.columns=['YEAR','MIN','MAX']
+
+## outliers per year (by std dev)
+olrs_std = pd.pivot_table(df, index=['YEAR'],values=['PRICE_DIFF'],aggfunc=('std','mean'))
+olrs_std.reset_index(inplace=True)
+olrs_std.columns = olrs_std.columns.droplevel(0)
+olrs_std['LOW'] = olrs_std['mean']-(2*olrs_std['std'])
+olrs_std['HI'] = olrs_std['mean']+(2*olrs_std['std'])
