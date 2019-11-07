@@ -78,6 +78,7 @@ df['PRICE_DIFF'] = (df['SALE_PRICE'] - df['ASMT'])/df['ASMT']
 olrs = pd.pivot_table(df, index=['YEAR'],values=['SALE_PRICE'],aggfunc='count')
 olrs.reset_index(inplace=True)
 olrs.rename(columns={'SALE_PRICE':'SALES'},inplace=True)
+
 olrs['CUTOFF'] = olrs['SALES'].apply(lambda x: int(x*trim))
 
 min_max = []
@@ -89,11 +90,20 @@ for row in range(0, len(olrs)):
     min_max.append([year,mn,mx])
 
 min_max  = pd.DataFrame(min_max)
-min_max.columns=['YEAR','MIN','MAX']
+min_max.columns=['YEAR','THD_LOW','THD_HI']
+
+olrs_thd = pd.merge(olrs, min_max, how='left') 
 
 ## outliers per year (by std dev)
 olrs_std = pd.pivot_table(df, index=['YEAR'],values=['PRICE_DIFF'],aggfunc=('std','mean'))
 olrs_std.reset_index(inplace=True)
 olrs_std.columns = olrs_std.columns.droplevel(0)
-olrs_std['LOW'] = olrs_std['mean']-(2*olrs_std['std'])
-olrs_std['HI'] = olrs_std['mean']+(2*olrs_std['std'])
+olrs_std['STD_LOW'] = olrs_std['mean']-(2*olrs_std['std'])
+olrs_std['STD_HI'] = olrs_std['mean']+(2*olrs_std['std'])
+olrs_std.rename(columns={'':'YEAR','std':'STD','mean':'MEAN','STD_LOW':'STD_LOW','STD_HI':'STD_HI'},inplace=True)
+
+## outliers table
+o_df = pd.merge(olrs_thd, olrs_std, how='left', left_on=['YEAR'], right_on=['YEAR'])
+o_df.drop(columns=['SALES','CUTOFF','MEAN','STD'], inplace=True)
+
+df = pd.merge(df, o_df, how='left')
