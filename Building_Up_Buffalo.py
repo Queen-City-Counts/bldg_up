@@ -1,3 +1,4 @@
+
 import pandas as pd
 import numpy as np
 
@@ -107,3 +108,10 @@ o_df = pd.merge(olrs_thd, olrs_std, how='left', left_on=['YEAR'], right_on=['YEA
 o_df.drop(columns=['SALES','CUTOFF','MEAN','STD'], inplace=True)
 
 df = pd.merge(df, o_df, how='left')
+df['TRIM_THD'] = (df['THD_LOW'] < df['PRICE_DIFF']) & (df['THD_HI'] > df['PRICE_DIFF'])
+df['TRIM_STD'] = (df['STD_LOW'] < df['PRICE_DIFF']) & (df['STD_HI'] > df['PRICE_DIFF'])
+df = df.drop(['STD_LOW','STD_HI','THD_LOW','THD_HI'],axis=1)
+df = df[df['TRIM_STD']==0]
+df['TYPE'] = df['PROP_TYPE'].apply(lambda x: 'COM' if x[0] == '2' else 'RES')
+
+d = pd.pivot_table(df, index=['NBHD'],columns=['YEAR','TYPE'],values=['PRICE_DIFF'],aggfunc=('mean'))
