@@ -1,117 +1,136 @@
-
+import bs4 as bs
 import pandas as pd
 import numpy as np
+import re, urllib.request, requests
 
 pd.set_option('display.max_columns', None)
 
 start_yr = 2008
 end_yr = 2018
-trim = .025
 
-## create year df
-year = list()
+## create year range df
+years = []
 for y in range(0,(end_yr - start_yr+1)):
-    year.append(str(start_yr+y))
+    years.append(str(start_yr+y))
     
-year = pd.DataFrame(year)
-year.columns = ['YEAR']
+years = pd.DataFrame(years)
+years.columns = ['YEAR']
+
 
 ## ASSESSMENT DATA
 ## city has been using same assessment roll throughout period
 ## https://www.wkbw.com/news/local-news/sticker-shock-with-new-buffalo-property-assessments
 asmt = pd.read_csv('/home/dan/Python/QueenCityCounts/bldg_up/data/2017-2018_Assessment_Roll.csv', dtype=object)
 asmt = asmt[['PRINT KEY','PROPERTY CLASS','TOTAL VALUE','NEIGHBORHOOD']].drop_duplicates()
+asmt.rename(columns={'PRINT KEY':'SBL','PROPERTY CLASS':'PROP_TYPE','TOTAL VALUE':'ASMT','NEIGHBORHOOD':'NBHD'},inplace=True)
 
 ## only want the 200s (residentials) and 400s (commercials)
 ## https://www.tax.ny.gov/research/property/assess/manuals/prclas.htm
-asmt = asmt.loc[asmt['PROPERTY CLASS'].astype(str).str[0].isin(['2','4'])]
-asmt.rename(columns={'PRINT KEY':'SBL','PROPERTY CLASS':'PROP_TYPE','TOTAL VALUE':'ASMT','NEIGHBORHOOD':'NBHD'},inplace=True)
+asmt = asmt.loc[asmt['PROP_TYPE'].astype(str).str[0].isin(['2','4'])]
 
-## SALES DATA
-## read in and clean
-sales = pd.read_csv('/home/dan/Python/QueenCityCounts/bldg_up/data/property_sales_(2000-01-01--2019-10-15).csv', dtype=object)
 
-sales['assessment'] = sales['assessment'].apply(lambda x: x.strip('$').replace(',',''))
-sales['SALE_PRICE'] = sales['sale_price'].apply(lambda x: x.strip('$').replace(',',''))
-
-sales['sale_yr'] = sales['sale_date'].apply(lambda x: x.split('/')[-1])
 
 ## PERMITS DATA
 pmts = pd.read_csv('/home/dan/Python/QueenCityCounts/bldg_up/data/Permits 2019-2007.csv',  dtype=object)
 pmts = pmts[['PERMIT NUMBER','ISSUED','SBL']].drop_duplicates()
 pmts['YEAR'] = pmts['ISSUED'].apply(lambda x: x.split('/')[-1])
 
-def format_sbl(sbl_long):
-    sbl = str(sbl_long)[0:3].strip('0') + '.' + str(sbl_long)[3:5].strip('0') + '-' + str(sbl_long)[5:10].strip('0') + '-' + str(sbl_long)[10:13].strip('0')  + '.' + str(sbl_long)[13:16].strip('0') + '/' + str(sbl_long)[16:].strip('0')
-    if sbl[-1] == '/' and sbl[-2] != '.':
-        sbl = sbl[:-1]
-    elif sbl[-2:] == './':
-        sbl = sbl[:-2]
-    if sbl == 'nan.--' or sbl == '.--':
-        sbl = 'missing'
-    return sbl
+## Permits lists long sbl, Assessment uses short sbl.  Get the two to agree.
+## https://www.preservationready.org/Main/SBLNumber
+def long_sbl_to_short(long_sbl):
+    short_sbl = str(long_sbl)[0:3].strip('0') + '.' + str(long_sbl)[3:5].strip('0') + '-' + str(long_sbl)[5:10].strip('0') + '-' + str(long_sbl)[10:13].strip('0')  + '.' + str(long_sbl)[13:16].strip('0') + '/' + str(long_sbl)[16:].strip('0')
+    if short_sbl[-1] == '/' and short_sbl[-2] != '.':
+        short_sbl = short_sbl[:-1]
+    elif short_sbl[-2:] == './':
+        short_sbl = short_sbl[:-2]
+    if short_sbl == 'nan.--' or short_sbl == '.--':
+        short_sbl = 'missing'
+    return short_sbl
 
-pmts['SBL'] = pmts['SBL'].apply(format_sbl)
+pmts['SBL'] = pmts['SBL'].apply(long_sbl_to_short)
 
+## count how many permits were ever filed at each sbl
 pmts = pd.pivot_table(pmts, index=['YEAR','SBL'],values=['PERMIT NUMBER'],aggfunc='count')
 pmts.reset_index(inplace=True)
-pmts.rename(columns={'PERMIT NUMBER':'PERMITS'},inplace=True)
+pmts.rename(columns={'PERMIT NUMBER':'PERMIT_COUNT'},inplace=True)
+
 
 ## CONSTRUCT MAIN DF
-## repeat entire asmt df, for each year in the time range
-year = year.assign(key=1)
-asmt = asmt.assign(key=1)
-df = asmt.merge(year, on='key',how='inner').drop('key',axis=1)
-df = df.sort_values('YEAR', ascending=True).reset_index(drop=True)
 
-## if property has a sale recorded in sales df, bring that into main df
-df = pd.merge(df, sales[['SALE_PRICE','sale_yr','sbl_short']], how = 'left', left_on = ['YEAR','SBL'], right_on = ['sale_yr','sbl_short'])
+## repeat entire asmt df for ever year in the time range
+years = years.assign(key=1)
+asmt = asmt.assign(key=1)
+df = asmt.merge(years, on='key',how='inner').drop(columns=['key'])
+df = df.sort_values(['YEAR','SBL'], ascending=True).reset_index(drop=True)
 
 ## if property has any permits recorded in pmts df, bring that in to main df
-df = pd.merge(df, pmts[['PERMITS', 'YEAR','SBL']], how = 'left', left_on = ['YEAR','SBL'], right_on = ['YEAR','SBL'])
+df = pd.merge(df, pmts[['PERMIT_COUNT', 'YEAR','SBL']], how = 'left', left_on = ['YEAR','SBL'], right_on = ['YEAR','SBL'])
 
-## polish up the df
-df = df[['SBL','YEAR','PROP_TYPE','ASMT','SALE_PRICE','NBHD','PERMITS']]
-df = df.astype({'ASMT': float, 'SALE_PRICE': float, 'PERMITS': float})
-df['PRICE_DIFF'] = (df['SALE_PRICE'] - df['ASMT'])/df['ASMT']
+## SALES HISTORY
 
-## outliers per year (by hard threshold)
-olrs = pd.pivot_table(df, index=['YEAR'],values=['SALE_PRICE'],aggfunc='count')
-olrs.reset_index(inplace=True)
-olrs.rename(columns={'SALE_PRICE':'SALES'},inplace=True)
+## get long sbl from the short sbl
+## https://www.preservationready.org/Main/SBLNumber
+def short_sbl_to_long(short_sbl):
+    long_sbl = re.split('[.|/|-]',short_sbl)
+    try:
+        SECTION = long_sbl[0].zfill(3)
+    except:
+        SECTION = '000'
+    try:
+        SUBSECTION = long_sbl[1].zfill(2)
+    except:
+        SUBSECTION = '00'
+    try:
+        BLOCK = long_sbl[2].zfill(5)
+    except:
+        BLOCK = '00000' 
+    try:
+        LOT = long_sbl[3].zfill(3)
+    except:
+        LOT = '000'
+    try:
+        SUBLOT = long_sbl[4].strip()
+    except:
+        SUBLOT = '000'
+    try:
+        SUFFIX = long_sbl[5].strip()
+    except:
+        SUFFIX = ''
+    long_sbl = (SECTION + SUBSECTION + BLOCK + LOT + SUBLOT).replace(' ','').ljust(16, '0')
+    long_sbl = long_sbl + SUFFIX
+    return long_sbl
 
-olrs['CUTOFF'] = olrs['SALES'].apply(lambda x: int(x*trim))
+lkup = pd.DataFrame()
+lkup['SHORT_SBL'] = df['SBL'].drop_duplicates()
+lkup['LONG_SBL'] = lkup['SHORT_SBL'].apply(short_sbl_to_long)
+lkup['TARGET_URL'] = 'https://buffalo.oarsystem.com/assessment/r1parc.asp?swis=140200&sbl=' + lkup['LONG_SBL']
 
-min_max = []
-for row in range(0, len(olrs)):
-    year = olrs.loc[row,'YEAR']
-    trim = olrs.loc[row,'CUTOFF']
-    mx = df[df['YEAR'] == year]['PRICE_DIFF'].nlargest(trim).iloc[-1]
-    mn = df[df['YEAR'] == year]['PRICE_DIFF'].nsmallest(trim).iloc[0]
-    min_max.append([year,mn,mx])
+def parcelid_lookup(url):
+    if requests.get(url).status_code == 200:
+        raw = urllib.request.urlopen(url).read().decode("utf8")
+        start = raw.find('parcelid=')
+        end = raw.find('\'',start)
+        parcelid = str(raw[start+9:end])
+        return parcelid
+    else:
+        return 'error'
 
-min_max  = pd.DataFrame(min_max)
-min_max.columns=['YEAR','THD_LOW','THD_HI']
+###OBS = 10####
+lkup = lkup[:10]
+###OBS = 10####
 
-olrs_thd = pd.merge(olrs, min_max, how='left') 
+lkup['PARCEL_ID'] = lkup['TARGET_URL'].apply(parcelid_lookup)
 
-## outliers per year (by std dev)
-olrs_std = pd.pivot_table(df, index=['YEAR'],values=['PRICE_DIFF'],aggfunc=('std','mean'))
-olrs_std.reset_index(inplace=True)
-olrs_std.columns = olrs_std.columns.droplevel(0)
-olrs_std['STD_LOW'] = olrs_std['mean']-(2*olrs_std['std'])
-olrs_std['STD_HI'] = olrs_std['mean']+(2*olrs_std['std'])
-olrs_std.rename(columns={'':'YEAR','std':'STD','mean':'MEAN','STD_LOW':'STD_LOW','STD_HI':'STD_HI'},inplace=True)
+## CREATE SALES DF
+sales = pd.DataFrame()
+sales = lkup[lkup['PARCEL_ID']!='error'].drop(columns=['URL'])
+sales['URL'] = 'https://buffalo.oarsystem.com/assessment/sales.asp?swis=140200&parcelid=' + sales['PARCEL_ID']
 
-## outliers table
-o_df = pd.merge(olrs_thd, olrs_std, how='left', left_on=['YEAR'], right_on=['YEAR'])
-o_df.drop(columns=['SALES','CUTOFF','MEAN','STD'], inplace=True)
-
-df = pd.merge(df, o_df, how='left')
-df['TRIM_THD'] = (df['THD_LOW'] < df['PRICE_DIFF']) & (df['THD_HI'] > df['PRICE_DIFF'])
-df['TRIM_STD'] = (df['STD_LOW'] < df['PRICE_DIFF']) & (df['STD_HI'] > df['PRICE_DIFF'])
-df = df.drop(['STD_LOW','STD_HI','THD_LOW','THD_HI'],axis=1)
-df = df[df['TRIM_STD']==0]
-df['TYPE'] = df['PROP_TYPE'].apply(lambda x: 'COM' if x[0] == '2' else 'RES')
-
-d = pd.pivot_table(df, index=['NBHD'],columns=['YEAR','TYPE'],values=['PRICE_DIFF'],aggfunc=('mean'))
+def lookup_sales(url):
+        source = urllib.request.urlopen(url)
+        soup = bs.BeautifulSoup(source, 'lxml')
+        raw=[]
+        for tr in soup.find_all("tr"):
+            tds = tr.find_all("td")
+            raw.append(tds)
+        return raw
