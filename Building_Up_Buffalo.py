@@ -115,22 +115,44 @@ def parcelid_lookup(url):
     else:
         return 'error'
 
-###OBS = 10####
-lkup = lkup[:10]
-###OBS = 10####
+###OBS####
+lkup = lkup[:3]
+###OBS####
 
 lkup['PARCEL_ID'] = lkup['TARGET_URL'].apply(parcelid_lookup)
 
 ## CREATE SALES DF
-sales = pd.DataFrame()
-sales = lkup[lkup['PARCEL_ID']!='error'].drop(columns=['URL'])
-sales['URL'] = 'https://buffalo.oarsystem.com/assessment/sales.asp?swis=140200&parcelid=' + sales['PARCEL_ID']
+parcels = pd.DataFrame()
+parcels = lkup[lkup['PARCEL_ID']!='error'].drop(columns=['TARGET_URL']).drop_duplicates()
+parcels['TARGET_URL'] = 'https://buffalo.oarsystem.com/assessment/sales.asp?swis=140200&parcelid=' + parcels['PARCEL_ID']
 
-def lookup_sales(url):
-        source = urllib.request.urlopen(url)
+def get_sales_records(target_url):
+    try:
+        source = urllib.request.urlopen(target_url)
         soup = bs.BeautifulSoup(source, 'lxml')
-        raw=[]
+
+        raw = []
         for tr in soup.find_all("tr"):
             tds = tr.find_all("td")
             raw.append(tds)
-        return raw
+        
+        records = []
+        if "No Sales History" in str(raw[-1]):
+            records.append(['na']*len(raw[1]))
+        else:
+            for row in range(2, int(len(raw))):
+                data = [i.getText() for i in raw[row]]
+                records.append(data)
+
+        df = pd.DataFrame.from_records(records)
+        df.columns = [i.getText().replace(' ','_') for i in raw[1]]
+    except:
+        pass
+    return df
+
+sales = pd.DataFrame()
+for row in range(0,len(parcels)):
+	target_url = parcels.loc[row,'TARGET_URL']
+	data = get_sales_records(target_url)
+	data['SHORT_SBL'] = parcels.loc[row,'SHORT_SBL']
+	sales = sales.append(data)
