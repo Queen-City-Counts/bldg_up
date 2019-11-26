@@ -1,6 +1,7 @@
 import bs4 as bs
 import pandas as pd
 import numpy as np
+import datetime as dt
 import re, urllib.request, requests
 
 pd.set_option('display.max_columns', None)
@@ -56,7 +57,6 @@ pmts.rename(columns={'PERMIT NUMBER':'PERMIT_COUNT'},inplace=True)
 
 
 ## CONSTRUCT MAIN DF
-
 ## repeat entire asmt df for ever year in the time range
 years = years.assign(key=1)
 asmt = asmt.assign(key=1)
@@ -106,20 +106,42 @@ lkup['LONG_SBL'] = lkup['SHORT_SBL'].apply(short_sbl_to_long)
 lkup['TARGET_URL'] = 'https://buffalo.oarsystem.com/assessment/r1parc.asp?swis=140200&sbl=' + lkup['LONG_SBL']
 
 def parcelid_lookup(url):
+    
+    #####
+    t1 = dt.datetime.now()
+    #####
+    
     if requests.get(url).status_code == 200:
         raw = urllib.request.urlopen(url).read().decode("utf8")
         start = raw.find('parcelid=')
         end = raw.find('\'',start)
         parcelid = str(raw[start+9:end])
+        
+        ###v###
+        t2 = dt.datetime.now()
+        elapsed = str((t2-t1).seconds) + '.' + str((t2-t1).microseconds)
+        print('')
+        print('Page ' + str(url))
+        print('Got parcel id = ' + parcelid + ' (' + elapsed + ' sec)')
+        ###^###
+        
         return parcelid
     else:
+        
+        ###v###
+        t2 = dt.datetime.now()
+        elapsed = str((t2-t1).seconds) + '.' + str((t2-t1).microseconds)
+        print()
+        print('Page ' + str(url))
+        print('ERROR (' + elapsed + ' sec)')
+        ###^###
+        
         return 'error'
 
-###OBS####
-lkup = lkup[:3]
-###OBS####
-
+lkup = lkup[:16]
 lkup['PARCEL_ID'] = lkup['TARGET_URL'].apply(parcelid_lookup)
+## lkup.to_csv('lkup.csv')
+
 
 ## CREATE SALES DF
 parcels = pd.DataFrame()
@@ -137,6 +159,7 @@ def get_sales_records(target_url):
             raw.append(tds)
         
         records = []
+        
         if "No Sales History" in str(raw[-1]):
             records.append(['na']*len(raw[1]))
         else:
@@ -152,7 +175,16 @@ def get_sales_records(target_url):
 
 sales = pd.DataFrame()
 for row in range(0,len(parcels)):
-	target_url = parcels.loc[row,'TARGET_URL']
-	data = get_sales_records(target_url)
-	data['SHORT_SBL'] = parcels.loc[row,'SHORT_SBL']
-	sales = sales.append(data)
+    t1 = dt.datetime.now()
+    target_url = parcels.loc[row,'TARGET_URL']
+    data = get_sales_records(target_url)
+    data['SHORT_SBL'] = parcels.loc[row,'SHORT_SBL']
+    data['LONG_SBL'] = parcels.loc[row,'LONG_SBL']
+    sales = sales.append(data)
+    t2 = dt.datetime.now()
+    elapsed = str((t2-t1).seconds) + '.' + str((t2-t1).microseconds)
+    print()
+    print('Sale history for ' + str(parcels.loc[row,'SHORT_SBL']) +' added: ' + str(len(data)) + ' records (' + elapsed + ' sec)')
+        
+##sales.to_csv('sales.csv')
+
